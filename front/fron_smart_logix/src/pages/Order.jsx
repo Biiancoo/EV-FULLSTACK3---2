@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getOrders, createOrder, getOrderByNumber } from "../service/orderService";
+import { calcularPuntosGanados } from '../service/puntosService';
 
 const STATUS_LABEL = {
   PENDING: "Pendiente", PROCESSING: "Procesando",
@@ -146,6 +147,17 @@ function OrderPage() {
             ))}
           </div>
 
+          {form.lines.some(l => l.unitPrice > 0 && l.quantity > 0) && (
+            <div className="puntos-preview">
+              Con esta orden ganarás{" "}
+              <strong>
+                {calcularPuntosGanados(
+                  form.lines.reduce((sum, l) => sum + (Number(l.quantity) * Number(l.unitPrice)), 0),
+                  8
+                )} puntos
+              </strong>
+            </div>
+          )}  
           <button type="submit" className="btn-primary" disabled={formLoading}>
             {formLoading ? "Creando..." : "Crear Orden"}
           </button>
@@ -159,7 +171,7 @@ function OrderPage() {
         <div className="table-wrapper">
           <table className="data-table">
             <thead>
-              <tr><th>N° Orden</th><th>Estado</th><th>Total</th><th>Tracking</th><th>Creada</th></tr>
+              <tr><th>N° Orden</th><th>Estado</th><th>Total</th><th>Puntos ganados</th><th>Tracking</th><th>Creada</th></tr>
             </thead>
             <tbody>
               {orders.length === 0 ? (
@@ -170,6 +182,7 @@ function OrderPage() {
                     <td><code>{o.orderNumber}</code></td>
                     <td><span className={`badge badge-${o.status}`}>{STATUS_LABEL[o.status] || o.status}</span></td>
                     <td>${o.totalAmount}</td>
+                    <td>{calcularPuntosGanados(o.totalAmount, 8)} pts</td>
                     <td>{o.trackingCode ? <code>{o.trackingCode}</code> : "—"}</td>
                     <td>{o.createdAt ? new Date(o.createdAt).toLocaleDateString("es-CL") : "—"}</td>
                   </tr>

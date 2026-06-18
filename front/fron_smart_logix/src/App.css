@@ -349,3 +349,12 @@ code {
 .login-msg { padding: 8px 12px; border-radius: var(--radius); font-size: 13px; }
 .login-msg--error   { background: #fef2f2; border: 1px solid #fca5a5; color: #991b1b; }
 .login-msg--success { background: #f0fdf4; border: 1px solid #86efac; color: #166534; }
+
+.puntos-preview {
+  background: #fefce8;
+  border: 1px solid #fcd34d;
+  color: #854d0e;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+}
