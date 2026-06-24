@@ -3,6 +3,8 @@ package com.smartlogix.inventory.controller;
 import com.smartlogix.inventory.dto.CreateInventoryItemRequest;
 import com.smartlogix.inventory.dto.InventoryAvailabilityResponse;
 import com.smartlogix.inventory.dto.InventoryItemResponse;
+import com.smartlogix.inventory.dto.InventoryRecommendationResponse;
+import com.smartlogix.inventory.service.AiRecommendationService;
 import com.smartlogix.inventory.service.InventoryService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
@@ -23,9 +25,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class InventoryController {
 
     private final InventoryService inventoryService;
+    private final AiRecommendationService aiRecommendationService;
 
-    public InventoryController(InventoryService inventoryService) {
+    public InventoryController(InventoryService inventoryService, AiRecommendationService aiRecommendationService) {
         this.inventoryService = inventoryService;
+        this.aiRecommendationService = aiRecommendationService;
     }
 
     @PostMapping("/items")
@@ -36,6 +40,11 @@ public class InventoryController {
     @GetMapping("/items")
     public List<InventoryItemResponse> list() {
         return inventoryService.findAll();
+    }
+
+    @GetMapping("/recommendations")
+    public List<InventoryRecommendationResponse> recommendations() {
+        return aiRecommendationService.getRecommendations();
     }
 
     @GetMapping("/items/{sku}")

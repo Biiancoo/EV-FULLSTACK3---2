@@ -49,3 +49,8 @@ export function dispatchItemRequest(sku, quantity, auth) {
     headers: { Authorization: auth },
   });
 }
+
+// GET /api/inventory/recommendations
+export function getRecommendationsRequest(auth) {
+  return httpRequest("/api/inventory/recommendations", { headers: { Authorization: auth } });
+}

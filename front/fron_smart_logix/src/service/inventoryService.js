@@ -5,6 +5,7 @@ import {
   reserveItemRequest,
   releaseItemRequest,
   dispatchItemRequest,
+  getRecommendationsRequest,
 } from "../api/inventoryApi";
 import { getRequiredAuthorizationHeader } from "./authService";
 
@@ -30,4 +31,8 @@ export function releaseItem(sku, quantity) {
 
 export function dispatchItem(sku, quantity) {
   return dispatchItemRequest(sku, quantity, getRequiredAuthorizationHeader());
+}
+
+export function getRecommendations() {
+  return getRecommendationsRequest(getRequiredAuthorizationHeader());
 }

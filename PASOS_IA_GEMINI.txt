@@ -1,0 +1,132 @@
+# INSTRUCCIONES - SmartLogix IA Recomendaciones
+# Fecha: 2026-06-23
+
+================================================================================
+1. LA API KEY DE GEMINI - CAMBIA?
+================================================================================
+
+La API key de Google Gemini NO cambia sola. Es PERMANENTE hasta que tu la 
+revoques manualmente en la pagina de Google AI Studio.
+
+IMPORTANTE: "AIzaSy..." es solo un ejemplo ficticio. NO es una key real.
+Tu necesitas obtener la TUYA propia en:
+
+    https://aistudio.google.com/app/apikey
+
+Pasos para obtener tu key:
+1. Ve a la URL de arriba con tu cuenta de Google
+2. Clic en "Create API key" (Crear clave API)
+3. Copia la key (empieza con AIzaSy... y tiene ~40 caracteres)
+4. Guardala en un lugar seguro - es la misma siempre
+
+================================================================================
+2. PASOS PARA LEVANTAR EL PROYECTO CON IA
+================================================================================
+
+Abre PowerShell (o CMD) y ejecuta estos comandos en orden:
+
+--- PASO 1: Ir a la carpeta del backend ---
+cd "C:\Users\bianc\OneDrive\Escritorio\SmartLogixAuth\SmartLogix"
+
+--- PASO 2: Definir la API key (forma rapida) ---
+$env:GEMINI_API_KEY="PEGA_AQUI_TU_KEY_REAL"
+
+Ejemplo real:
+$env:GEMINI_API_KEY="AIzaSyB1234567890abcdefg..."
+
+--- PASO 3: Levantar todo con Docker ---
+docker-compose up --build -d
+
+Esperar ~2 minutos hasta que todos los servicios esten healthy.
+
+--- PASO 4: Levantar el frontend (en otra terminal) ---
+cd "C:\Users\bianc\OneDrive\Escritorio\SmartLogixAuth\front\fron_smart_logix"
+npm run dev
+
+--- PASO 5: Abrir navegador ---
+http://localhost:5173
+
+================================================================================
+3. OPCION ALTERNATIVA: Usar archivo .env (mas comodo)
+================================================================================
+
+En vez de escribir la key en PowerShell cada vez, puedes crear un archivo
+.env dentro de la carpeta SmartLogix/ con este contenido:
+
+    GEMINI_API_KEY=AIzaSyB1234567890abcdefg...
+
+Y luego solo ejecutar:
+    cd "C:\Users\bianc\OneDrive\Escritorio\SmartLogixAuth\SmartLogix"
+    docker-compose up --build -d
+
+================================================================================
+4. SIN API KEY (FALLBACK AUTOMATICO)
+================================================================================
+
+Si NO configuras la API key, el sistema NO se rompe. Usa automaticamente
+el sistema de reglas (if-else) como respaldo. Todo funciona igual, solo que
+las recomendaciones son generadas por reglas en vez de por la IA de Gemini.
+
+Para usar el fallback, simplemente ejecuta:
+    docker-compose up --build -d
+(sin definir GEMINI_API_KEY)
+
+================================================================================
+5. COMO SABER SI ES LA IA O EL FALLBACK
+================================================================================
+
+En el panel de "Analisis Inteligente de Inventario", arriba a la derecha del
+titulo aparece un indicador:
+
+  - AZUL con texto "IA Gemini"  -> La respuesta viene de la IA real (Google Gemini)
+  - GRIS con texto "Reglas locales" -> La respuesta viene del fallback (reglas locales)
+
+Esto se muestra automaticamente en cada respuesta. El backend envia un campo
+"source" en cada recomendacion que dice "GEMINI" o "RULES".
+
+================================================================================
+6. COMO VERIFICAR QUE LA IA ESTA FUNCIONANDO
+================================================================================
+
+1. Inicia sesion en el frontend (admin / admin123)
+2. Ve a la pestana "Inventario"
+3. Clic en el boton "Recomendaciones"
+4. Deberia aparecer la tabla con recomendaciones y el indicador de fuente
+
+Si la key esta funcionando: el indicador dice "IA Gemini" y los textos de
+"Razon" son escritos por Gemini (en lenguaje natural).
+
+Si no hay key: el indicador dice "Reglas locales" y los textos son los del
+fallback (reglas predefinidas).
+
+================================================================================
+7. LINKS UTILES
+================================================================================
+
+Google AI Studio (para obtener la key):
+    https://aistudio.google.com/app/apikey
+
+Frontend (desarrollo local):
+    http://localhost:5173
+
+API Gateway:
+    http://localhost:8080
+
+Eureka (estado de servicios):
+    http://localhost:8761
+
+================================================================================
+8. CREDENCIALES DE PRUEBA
+================================================================================
+
+Usuario: admin
+Password: admin123
+Rol: ADMIN
+
+Usuario: user1
+Password: user123
+Rol: USER
+
+================================================================================
+FIN DEL DOCUMENTO
+================================================================================

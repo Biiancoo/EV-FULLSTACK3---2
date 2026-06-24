@@ -4,10 +4,13 @@ import com.smartlogix.inventory.domain.InventoryItem;
 import com.smartlogix.inventory.dto.CreateInventoryItemRequest;
 import com.smartlogix.inventory.dto.InventoryAvailabilityResponse;
 import com.smartlogix.inventory.dto.InventoryItemResponse;
+import com.smartlogix.inventory.dto.InventoryRecommendationResponse;
 import com.smartlogix.inventory.exception.InventoryNotFoundException;
 import com.smartlogix.inventory.exception.InventoryOperationException;
 import com.smartlogix.inventory.repository.InventoryItemRepository;
+import java.util.Comparator;
 import java.util.List;
+import java.time.OffsetDateTime;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -122,6 +125,68 @@ public class InventoryService {
                 item.getReservedQuantity(),
                 item.getReorderLevel(),
                 item.getUpdatedAt()
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public List<InventoryRecommendationResponse> getRecommendations() {
+        return repository.findAll().stream()
+                .map(this::toRecommendation)
+                .sorted(Comparator.comparing(InventoryRecommendationResponse::urgency,
+                        Comparator.comparingInt(this::urgencyPriority)))
+                .toList();
+    }
+
+    private int urgencyPriority(String urgency) {
+        return switch (urgency) {
+            case "CRITICAL" -> 0;
+            case "HIGH" -> 1;
+            case "MEDIUM" -> 2;
+            case "LOW" -> 3;
+            default -> 4;
+        };
+    }
+
+    private InventoryRecommendationResponse toRecommendation(InventoryItem item) {
+        int available = item.getAvailableQuantity();
+        int reserved = item.getReservedQuantity();
+        int reorder = item.getReorderLevel();
+        int effectiveStock = available - reserved;
+
+        String urgency;
+        int recommended;
+        String reason;
+
+        if (available <= reorder) {
+            urgency = "CRITICAL";
+            recommended = Math.max(reorder * 3 - available, reorder);
+            reason = "Stock disponible (" + available + ") es igual o menor al nivel de reorden (" + reorder + "). Reorden urgente requerida.";
+        } else if (available <= reorder * 2) {
+            urgency = "HIGH";
+            recommended = Math.max(reorder * 2 - available, reorder);
+            reason = "Stock disponible (" + available + ") está por debajo del doble del nivel de reorden (" + (reorder * 2) + "). Se recomienda reabastecer pronto.";
+        } else if (reserved > available * 0.5) {
+            urgency = "MEDIUM";
+            recommended = reorder;
+            reason = "Más del 50% del stock disponible (" + available + ") está reservado (" + reserved + "). Reabastecimiento preventivo sugerido.";
+        } else {
+            urgency = "LOW";
+            recommended = Math.max(reorder / 2, 1);
+            reason = "Niveles de stock saludables. Reorden preventivo menor para mantener buffer óptimo.";
+        }
+
+        return new InventoryRecommendationResponse(
+                item.getSku(),
+                item.getProductName(),
+                item.getWarehouseCode(),
+                available,
+                reserved,
+                reorder,
+                recommended,
+                urgency,
+                reason,
+                OffsetDateTime.now(),
+                "RULES"
         );
     }
 }

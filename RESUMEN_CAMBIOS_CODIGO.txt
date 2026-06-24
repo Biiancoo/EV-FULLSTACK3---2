@@ -1,0 +1,262 @@
+# RESUMEN DE CAMBIOS - SmartLogix IA Recomendaciones
+# Este documento explica cada archivo que se toco, que hace y por que
+
+================================================================================
+1. BACKEND - NUEVO ARCHIVO: AiRecommendationService.java
+================================================================================
+
+Ubicacion:
+  SmartLogix/inventory-service/src/main/java/.../service/AiRecommendationService.java
+
+Que hace:
+  Es el CEREBRO de la IA. Este servicio se encarga de:
+  
+  a) Tomar todos los productos del inventario desde la base de datos (H2).
+  b) Construir un PROMPT (texto de instrucciones) con los datos del inventario.
+  c) Enviar ese prompt a la API de Google Gemini (via HTTP POST).
+  d) Recibir la respuesta en JSON, limpiarla y convertirla a objetos Java.
+  e) Si Gemini falla o no hay API key configurada, usar el sistema de reglas
+     como fallback (respaldo) automaticamente.
+
+Partes clave del codigo:
+
+- `geminiApiKey`: lee la variable de entorno GEMINI_API_KEY. Si esta vacia,
+  salta al fallback.
+
+- `buildPrompt()`: crea el texto que le enviamos a la IA. Le dice:
+  "Eres un asistente de logistica. Analiza estos productos y dime que pedir
+   y en que cantidad. Responde SOLO con JSON."
+  
+- `callGemini()`: hace la llamada HTTP a:
+  https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent
+  
+- `extractTextFromResponse()`: extrae el texto de la respuesta de Gemini
+  (la respuesta viene anidada en "candidates" -> "content" -> "parts" -> "text").
+
+- `fallbackService.getRecommendations()`: si algo falla, usa el sistema de
+  reglas que ya existia (InventoryService.getRecommendations()).
+
+================================================================================
+2. BACKEND - MODIFICADO: InventoryService.java
+================================================================================
+
+Ubicacion:
+  SmartLogix/inventory-service/src/main/java/.../service/InventoryService.java
+
+Que cambio:
+  Se mantuvo el metodo `getRecommendations()` que YA habiamos creado antes,
+  pero ahora su trabajo cambio: ya no es el metodo principal, sino el
+  FALLBACK (respaldo) que usa AiRecommendationService cuando Gemini no
+  esta disponible.
+  
+  La logica de if-else que teniamos (CRITICAL, HIGH, MEDIUM, LOW) ahora
+  actua como plan B. Si la API de Gemini falla, el usuario nunca se entera
+  porque el sistema sigue respondiendo con recomendaciones validas.
+
+================================================================================
+3. BACKEND - MODIFICADO: InventoryController.java
+================================================================================
+
+Ubicacion:
+  SmartLogix/inventory-service/src/main/java/.../controller/InventoryController.java
+
+Que cambio:
+  - Se inyecto el nuevo `AiRecommendationService` en el constructor.
+  - El endpoint `GET /api/inventory/recommendations` ahora llama a
+    `aiRecommendationService.getRecommendations()` en vez de
+    `inventoryService.getRecommendations()`.
+  
+  El endpoint es el mismo que ya teniamos, pero ahora por detras llama
+  a la IA real en lugar de las reglas locales.
+
+================================================================================
+4. BACKEND - MODIFICADO: application.yml
+================================================================================
+
+Ubicacion:
+  SmartLogix/inventory-service/src/main/resources/application.yml
+
+Que cambio:
+  Se agregaron 3 lineas de configuracion para Gemini:
+
+    gemini.api.key: ${GEMINI_API_KEY:}        <-- lee la variable de entorno
+    gemini.api.model: gemini-2.0-flash        <-- modelo de IA a usar
+    gemini.api.enabled: true                   <-- activar/desactivar
+
+  Esto permite que el servicio sepa si debe usar Gemini o no, y que modelo
+  utilizar. El ${GEMINI_API_KEY:} es la sintaxis de Spring Boot para leer
+  variables de entorno con valor por defecto vacio.
+
+================================================================================
+5. BACKEND - MODIFICADO: docker-compose.yml
+================================================================================
+
+Ubicacion:
+  SmartLogix/docker-compose.yml
+
+Que cambio:
+  En el servicio `inventory-service`, se agrego la linea:
+
+    - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+
+  Esto le dice a Docker: "cuando levantes el contenedor, pasa la variable
+  de entorno GEMINI_API_KEY del host (tu PC) al contenedor". Si no existe
+  en el host, usa valor vacio. Con esta linea, el application.yml dentro
+  del contenedor puede leer la key.
+
+================================================================================
+6. BACKEND - NUEVO ARCHIVO: InventoryRecommendationResponse.java
+================================================================================
+
+Ubicacion:
+  SmartLogix/inventory-service/src/main/java/.../dto/InventoryRecommendationResponse.java
+
+Que hace:
+  Es un DTO (Data Transfer Object) que define la estructura de la respuesta.
+  Es la "caja" donde guardamos cada recomendacion. Contiene:
+  - sku, productName, warehouseCode (identificacion del producto)
+  - currentStock, reservedStock, reorderLevel (datos actuales)
+  - recommendedQuantity (cuanto pedir - lo que calcula la IA)
+  - urgency (CRITICAL, HIGH, MEDIUM, LOW)
+  - reason (texto explicativo generado por la IA)
+  - generatedAt (fecha/hora de la recomendacion)
+
+  Tanto el sistema de reglas (fallback) como Gemini devuelven objetos
+  con esta misma estructura. Asi el frontend no necesita saber de donde
+  vino la respuesta.
+
+================================================================================
+7. FRONTEND - MODIFICADO: inventoryApi.js
+================================================================================
+
+Ubicacion:
+  front/fron_smart_logix/src/api/inventoryApi.js
+
+Que cambio:
+  Se agrego la funcion `getRecommendationsRequest(auth)` que hace un
+  GET a `/api/inventory/recommendations` con el header de autorizacion JWT.
+  
+  Es la capa mas baja del frontend - solo sabe hacer la llamada HTTP.
+
+================================================================================
+8. FRONTEND - MODIFICADO: inventoryService.js
+================================================================================
+
+Ubicacion:
+  front/fron_smart_logix/src/service/inventoryService.js
+
+Que cambio:
+  Se agrego la funcion `getRecommendations()` que importa la funcion de
+  inventoryApi.js y le pasa el token de autenticacion. Es la capa de
+  logica de negocio del frontend.
+
+  El patron de 3 capas del frontend se mantiene:
+  - Pages (UI) -> Service (logica) -> API (HTTP) -> Backend
+
+================================================================================
+9. FRONTEND - MODIFICADO: Inventory.jsx
+================================================================================
+
+Ubicacion:
+  front/fron_smart_logix/src/pages/Inventory.jsx
+
+Que cambio:
+  Se agrego un nuevo panel completo de "Recomendaciones IA":
+  
+  - Nuevo estado: showRecs, recs, recLoading, recError
+  - Nuevo boton en el header: "🤖 Recomendaciones IA"
+  - Funcion loadRecommendations(): llama a getRecommendations() del service
+  - Tabla que muestra las recomendaciones con colores segun prioridad:
+    * CRITICAL  -> fila roja (row-danger)
+    * HIGH      -> fila amarilla (row-warn)
+    * MEDIUM    -> fila azul (row-info)
+    * LOW       -> fila normal
+  - Badges de colores para cada nivel de urgencia
+
+  El boton es un toggle: clic una vez para abrir, clic otra para cerrar.
+  Al abrir, automaticamente carga las recomendaciones desde el backend.
+
+================================================================================
+10. FRONTEND - MODIFICADO: App.css
+================================================================================
+
+Ubicacion:
+  front/fron_smart_logix/src/App.css
+
+Que cambio:
+  Se agregaron clases CSS para los badges de prioridad de la IA:
+
+    .badge--critical  { background rojo, texto rojo oscuro }
+    .badge--high      { background naranja, texto naranja oscuro }
+    .badge--medium    { background amarillo, texto amarillo oscuro }
+    .badge--low       { background verde, texto verde oscuro }
+
+  Y clases para las filas de la tabla:
+
+    .row-danger td { background rojo !important }
+    .row-info td   { background azul !important }
+
+  Esto permite que las recomendaciones se vean con colores llamativos
+  segun la urgencia.
+
+================================================================================
+FLUJO COMPLETO DE UNA PETICION
+================================================================================
+
+Usuario clic en "🤖 Recomendaciones IA"
+  |
+  v
+Inventory.jsx -> inventoryService.getRecommendations()
+  |
+  v
+inventoryService.js -> inventoryApi.getRecommendationsRequest(auth)
+  |
+  v
+inventoryApi.js -> HTTP GET /api/inventory/recommendations (con JWT)
+  |
+  v
+API Gateway (localhost:8080) -> enruta a inventory-service
+  |
+  v
+InventoryController.recommendations() -> aiRecommendationService.getRecommendations()
+  |
+  v
+AiRecommendationService:
+  1. Lee todos los productos del inventario (H2)
+  2. Construye un prompt con los datos
+  3. Llama a Gemini API via HTTP POST
+  4. Gemini analiza y responde con JSON
+  5. Convierte el JSON a lista de InventoryRecommendationResponse
+  6. Si falla, usa fallback (reglas locales)
+  |
+  v
+Respuesta JSON via HTTP -> Frontend
+  |
+  v
+Inventory.jsx renderiza la tabla con colores y prioridades
+
+================================================================================
+RESUMEN: POR QUE ESTO ES "IA REAL"
+================================================================================
+
+Antes (solo reglas):
+  El codigo Java tomaba decisiones con if/else. No habia inteligencia
+  externa, solo algoritmos predefinidos.
+
+Ahora (con Gemini):
+  El codigo Java envia los datos a un modelo de lenguaje (LLM) de Google
+  que fue entrenado con millones de datos. El modelo "piensa" y genera
+  recomendaciones en texto natural. Es como tener un analista de
+  logistica virtual que lee tu inventario y te dice que hacer.
+
+  Si el modelo dice:
+    "El stock del SKU-3001 es preocupante porque solo quedan 45 unidades
+     y el nivel de reorden es 10. Dado que es un monitor de alta rotacion,
+     recomiendo pedir 30 unidades para evitar quiebre de stock."
+  
+  Ese texto NO fue escrito por un if/else. Fue generado por la IA.
+
+  Si Gemini no esta disponible, el sistema usa reglas como respaldo.
+  Es robusto y profesional.
+
+================================================================================

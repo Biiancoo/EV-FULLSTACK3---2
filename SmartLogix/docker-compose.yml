@@ -47,6 +47,7 @@ services:
     environment:
       - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-service:8761/eureka/
       - JWT_SECRET=${JWT_SECRET:-SmartLogixSuperSecretKeyForJWT2024PlatformMicroservicesArchitecture!!}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8081/actuator/health"]
       interval: 15s
