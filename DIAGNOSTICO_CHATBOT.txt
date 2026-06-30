@@ -1,0 +1,114 @@
+================================================================================
+1. VERIFICAR QUE LOS CONTENEDORES ESTAN CORRIENDO
+================================================================================
+
+Ejecuta:
+
+docker ps --format "table {{.Names}}\t{{.Status}}"
+
+Deberias ver 7 contenedores activos. Si no aparece ninguno, Docker Compose no levanto.
+
+Si aparecen contenedores pero con nombres diferentes, usa el nombre REAL para los logs.
+Ejemplo: si aparece "ev-fullstack3-2_chatbot-service_1", usa ese nombre en los comandos de abajo.
+
+================================================================================
+2. VERIFICAR LOGS DEL CHATBOT (nombre exacto del contenedor)
+================================================================================
+
+Primero encuentra el nombre real:
+
+docker ps --format "{{.Names}}" | findstr chatbot
+
+Luego usa ese nombre (ejemplo):
+
+docker logs --tail 30 NOMBRE_DEL_CONTENEDOR
+
+Busca estas lineas en los logs:
+
+a) "Gemini enabled: true, key present: true" -> La key SI llego.
+b) "Gemini enabled: true, key present: false" -> La key NO llego.
+c) "Error al llamar a Gemini API: 429..." -> Sin tokens.
+d) "UnknownHostException: generativelanguage..." -> Sin internet.
+e) "Usando respuesta de fallback." -> Fallback activo.
+
+================================================================================
+3. VERIFICAR QUE LA API KEY LLEGA AL CONTENEDOR
+================================================================================
+
+Primero encuentra el nombre exacto del contenedor:
+
+docker ps --format "{{.Names}}" | findstr chatbot
+
+Luego ejecuta (reemplaza NOMBRE):
+
+docker exec NOMBRE_DEL_CONTENEDOR env | findstr GEMINI
+
+Deberias ver:
+GEMINI_API_KEY=AIzaSy...
+
+Si no aparece, la variable no se paso. Solucion:
+   a) docker-compose down
+   b) $env:GEMINI_API_KEY="AIzaSy...TU_KEY..."
+   c) echo $env:GEMINI_API_KEY
+   d) docker-compose up --build -d
+
+================================================================================
+4. VERIFICAR SI EL CONTENEDOR TIENE INTERNET
+================================================================================
+
+Encuentra el nombre del contenedor:
+
+docker ps --format "{{.Names}}" | findstr chatbot
+
+Luego prueba:
+
+docker exec NOMBRE_DEL_CONTENEDOR curl -s https://generativelanguage.googleapis.com/v1beta/models -o /dev/null -w "%{http_code}"
+
+Si devuelve 400, 401 o 403 -> HAY internet (conexion OK, pero falla autenticacion).
+Si devuelve 000 o timeout -> NO hay internet.
+
+================================================================================
+5. PROBAR LA API KEY DIRECTAMENTE (sin Docker)
+================================================================================
+
+Reemplaza TU_KEY en PowerShell:
+
+Invoke-RestMethod -Uri "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=TU_KEY" -Method POST -ContentType "application/json" -Body '{"contents":[{"parts":[{"text":"Hola"}]}],"generationConfig":{"temperature":0.3,"maxOutputTokens":100}}'
+
+Si dice "API_KEY_INVALID" -> Key invalida.
+Si dice "QUOTA_EXHAUSTED" o "429" -> Sin tokens.
+Si devuelve JSON con "candidates" -> Key funciona.
+
+================================================================================
+6. COMANDO RAPIDO DE VERIFICACION (copiar y pegar)
+================================================================================
+
+cd "C:\Users\bianc\OneDrive\Escritorio\SmartLogixAuth\SmartLogix"
+$env:GEMINI_API_KEY="AIzaSy...TU_KEY..."
+echo "=== Gemini Key ==="
+echo $env:GEMINI_API_KEY
+echo "=== Contenedores ==="
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+echo "=== Nombres de contenedores ==="
+docker ps --format "{{.Names}}"
+
+================================================================================
+7. SI TODO FALLA: USAR SOLO FALLBACK (sin Gemini)
+================================================================================
+
+Si no tienes API key o se agotaron los tokens, puedes presentar la funcionalidad
+usando solo el fallback. El fallback responde con "Reglas locales" y el sistema
+funciona perfectamente.
+
+Para forzar el fallback:
+   a) No configures GEMINI_API_KEY (o borrala: $env:GEMINI_API_KEY="")
+   b) docker-compose down
+   c) docker-compose up --build -d
+   d) El chatbot usara automaticamente el fallback
+
+En el frontend veras "Reglas locales" en vez de "IA Gemini", pero el chatbot
+responde correctamente.
+
+================================================================================
+FIN
+================================================================================

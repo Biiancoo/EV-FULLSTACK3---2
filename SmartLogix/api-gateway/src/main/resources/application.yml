@@ -23,6 +23,10 @@ spring:
           uri: lb://shipment-service
           predicates:
             - Path=/api/shipments/**
+        - id: chatbot-service
+          uri: lb://chatbot-service
+          predicates:
+            - Path=/api/chat/**
       globalcors:
         cors-configurations:
           '[/**]':

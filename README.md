@@ -31,9 +31,9 @@ Navegador (React)  →  Docker puerto 3000
         ▼
    API Gateway (Spring Cloud Gateway)
         │ Valida JWT + enruta
-   ┌────┼─────────────┐
-   │    │             │
-auth  inventory   order   shipment
+   ┌────┼─────────────┬─────────────┐
+   │    │             │             │
+auth  inventory   order   shipment  chatbot
 ```
 
 ---
@@ -48,18 +48,21 @@ src/
 │   ├── Login.jsx
 │   ├── Shipments.jsx
 │   ├── Inventory.jsx
-│   └── Order.jsx
+│   ├── Order.jsx
+│   └── ChatbotWidget.jsx  ← Widget flotante (visible globalmente)
 ├── service/        ← Capa de lógica de negocio (Service)
 │   ├── authService.js
 │   ├── shipmentService.js
 │   ├── inventoryService.js
-│   └── orderService.js
+│   ├── orderService.js
+│   └── chatbotService.js
 └── api/            ← Capa HTTP pura (API)
     ├── httpClient.js     ← Cliente centralizado
     ├── authApi.js
     ├── shipmentApi.js
     ├── inventoryApi.js
-    └── orderApi.js
+    ├── orderApi.js
+    └── chatbotApi.js
 ```
 
 ### Descripción de cada capa
@@ -68,7 +71,7 @@ src/
 
 **Capa `service/`** — Aplica reglas de negocio antes de llamar al API: validaciones de formulario, obtención del token de sesión, formateo de datos. Los componentes nunca llaman a `api/` directamente.
 
-**Capa `pages/`** — Componentes React que renderizan la interfaz. Solo llaman funciones de `service/`. No saben nada de HTTP, fetch ni tokens.
+**Capa `pages/`** — Componentes React que renderizan la interfaz. Solo llaman funciones de `service/`. No saben nada de HTTP, fetch ni tokens. `ChatbotWidget.jsx` es un componente especial de tipo **widget flotante** que se monta en `App.jsx` y está disponible globalmente en todas las rutas privadas.
 
 ---
 
@@ -78,6 +81,7 @@ src/
 SmartLogix/                     ← Backend Spring Boot
 ├── api-gateway/
 ├── auth-service/
+├── chatbot-service/              ← Nuevo: Chatbot con IA
 ├── discovery-service/
 ├── inventory-service/
 ├── order-service/
@@ -92,18 +96,21 @@ front/
     │   │   ├── authApi.js
     │   │   ├── inventoryApi.js
     │   │   ├── orderApi.js
-    │   │   └── shipmentApi.js
+    │   │   ├── shipmentApi.js
+    │   │   └── chatbotApi.js
     │   ├── service/            ← Capa de negocio
     │   │   ├── authService.js
     │   │   ├── inventoryService.js
     │   │   ├── orderService.js
-    │   │   └── shipmentService.js
+    │   │   ├── shipmentService.js
+    │   │   └── chatbotService.js
     │   ├── pages/              ← Vistas
     │   │   ├── Login.jsx
     │   │   ├── Shipments.jsx
     │   │   ├── Inventory.jsx
-    │   │   └── Order.jsx
-    │   ├── App.jsx             ← Router + layout
+    │   │   ├── Order.jsx
+    │   │   └── ChatbotWidget.jsx
+    │   ├── App.jsx             ← Router + layout + widget flotante
     │   └── App.css             ← Estilos
     ├── Dockerfile
     └── nginx.conf
@@ -158,6 +165,12 @@ Todos los controladores del backend son consumidos por el frontend. El API Gatew
 | GET | `/api/shipments/{trackingCode}` | Buscar por tracking |
 | PATCH | `/api/shipments/{trackingCode}/status?value=STATUS` | Cambiar estado |
 
+### Chatbot Service — `/api/chat`
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| POST | `/api/chat/ask` | Enviar pregunta al chatbot IA. Recibe `{question: "..."}` y devuelve `{answer: "...", source: "GEMINI/RULES"}` |
+
 ---
 
 ## 5. CRUD implementado en el Frontend
@@ -182,6 +195,13 @@ Todos los controladores del backend son consumidos por el frontend. El API Gatew
 - **Login:** Acceso con usuario o email + contraseña
 - **Register:** Creación de cuenta nueva
 - **Logout:** Limpieza de sesión y retorno al login
+
+### Chatbot de Soporte con IA
+- **Widget flotante:** Botón circular fijo en la esquina inferior derecha, visible en todas las páginas después del login
+- **Consulta en tiempo real:** El usuario escribe preguntas sobre inventario, órdenes o envíos
+- **Respuesta inteligente:** El backend consulta los microservicios en vivo, arma un contexto con los datos actuales y envía el prompt a Google Gemini para generar una respuesta natural
+- **Fallback:** Si Gemini no está disponible, responde con reglas locales predefinidas
+- **Indicador de fuente:** Muestra "IA Gemini" (azul) o "Reglas locales" (gris) en cada respuesta
 
 ---
 
@@ -213,6 +233,15 @@ El API Gateway actúa como único punto de entrada al sistema. Centraliza:
 #### Service Discovery — Eureka
 Todos los microservicios se registran automáticamente en el servidor Eureka. El Gateway usa `lb://nombre-servicio` para balanceo de carga sin necesidad de IPs hardcodeadas.
 
+#### LLM Integration Pattern — `chatbot-service`
+El chatbot integra un modelo de lenguaje (LLM) de Google Gemini como asistente de soporte. El patrón sigue estos pasos:
+1. **Consulta de contexto:** el servicio obtiene datos en tiempo real de los otros microservicios (inventario, órdenes, envíos) vía el API Gateway
+2. **Prompt engineering:** arma un prompt estructurado con los datos JSON actuales + la pregunta del usuario
+3. **LLM inference:** envía el prompt a Gemini y recibe una respuesta en lenguaje natural
+4. **Fallback:** si Gemini no responde, usa reglas locales predefinidas
+
+**Ventaja:** El asistente responde con información **real y actualizada** del sistema, no con datos estáticos o inventados.
+
 ---
 
 ### Frontend
@@ -234,6 +263,12 @@ La navegación entre páginas usa el hash de la URL (`#/shipment`, `#/order`, `#
 
 #### Session Token Pattern — localStorage
 El JWT se almacena en `localStorage` con funciones helper centralizadas. Cuando el usuario abre la aplicación, `App.jsx` verifica si existe un token válido y decide si mostrar el login o el dashboard.
+
+#### Floating Widget Pattern — Chatbot
+El chatbot se implementa como un **widget flotante** (`position: fixed`) independiente del layout principal. Esto garantiza:
+- **Disponibilidad global:** visible en todas las páginas sin importar la ruta
+- **Sin interferencia:** no modifica el DOM ni el estado de las páginas existentes
+- **Toggle control:** el usuario abre/cierra con un botón circular
 
 ---
 
@@ -275,7 +310,7 @@ El backend completo se orquesta con `docker-compose`. El orden de arranque respe
 
 ```
 discovery-service
-    → auth-service, inventory-service, shipment-service
+    → auth-service, inventory-service, shipment-service, chatbot-service
         → order-service
             → api-gateway (expone puerto 8080)
 ```
@@ -337,10 +372,18 @@ git push origin main
 
 ```bash
 cd SmartLogix
+```
+
+**Opcional — activar la IA (Gemini):**
+```powershell
+$env:GEMINI_API_KEY="AIzaSy..."
+```
+
+```bash
 docker-compose up --build -d
 ```
 
-Esperar ~2 minutos. Verificar en http://localhost:8761 (Eureka) que todos los servicios estén registrados.
+Esperar ~2 minutos. Verificar en http://localhost:8761 (Eureka) que todos los servicios estén registrados (auth, inventory, order, shipment, chatbot).
 
 ### Paso 2 — Levantar el frontend
 
@@ -362,6 +405,7 @@ npm run dev
 - **Frontend:** http://localhost:3000 (Docker) o http://localhost:5173 (dev)
 - **API Gateway:** http://localhost:8080
 - **Eureka:** http://localhost:8761
+- **Chatbot (directo):** http://localhost:8085
 
 **Usuarios de prueba (seeded automáticamente por el backend):**
 

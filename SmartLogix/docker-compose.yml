@@ -103,6 +103,29 @@ services:
     expose:
       - "8082"
 
+  chatbot-service:
+    build:
+      context: .
+      dockerfile: chatbot-service/Dockerfile
+    image: smartlogix/chatbot-service:latest
+    depends_on:
+      discovery-service:
+        condition: service_healthy
+    restart: unless-stopped
+    environment:
+      - EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-service:8761/eureka/
+      - JWT_SECRET=${JWT_SECRET:-SmartLogixSuperSecretKeyForJWT2024PlatformMicroservicesArchitecture!!}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - API_GATEWAY_URL=http://api-gateway:8080
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8085/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 35s
+    expose:
+      - "8085"
+
   api-gateway:
     build:
       context: .
@@ -118,6 +141,8 @@ services:
       order-service:
         condition: service_healthy
       shipment-service:
+        condition: service_healthy
+      chatbot-service:
         condition: service_healthy
     restart: unless-stopped
     environment:

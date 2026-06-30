@@ -4,12 +4,13 @@ import LoginPage from "./pages/Login";
 import ShipmentsPage from "./pages/Shipments";
 import OrderPage from "./pages/Order";
 import InventoryPage from "./pages/Inventory";
+import ChatbotWidget from "./pages/ChatbotWidget";
 import { clearLogin, getSaveToken, getSaveUser } from "./service/authService";
 
 const PRIVATE_ROUTER = [
-  { key: "shipment", label: "📦 Envíos", hash: "#/shipment" },
-  { key: "order", label: "🛒 Órdenes", hash: "#/order" },
-  { key: "inventory", label: "🗃️ Inventario", hash: "#/inventory" },
+  { key: "shipment", label: "Envios", hash: "#/shipment" },
+  { key: "order", label: "Ordenes", hash: "#/order" },
+  { key: "inventory", label: "Inventario", hash: "#/inventory" },
 ];
 
 function getRouteFromHash() {
@@ -56,7 +57,7 @@ function App() {
     <div className="app-layout">
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <span>📦</span>
+          <span></span>
           <span>SmartLogix</span>
         </div>
 
@@ -84,6 +85,8 @@ function App() {
       <main className="app-content">
         {renderPage()}
       </main>
+
+      <ChatbotWidget />
     </div>
   );
 }
