@@ -1,0 +1,423 @@
+================================================================================
+DOCUMENTO TECNICO - Chatbot de Soporte con IA (SmartLogix)
+Fecha: 2026-06-30
+================================================================================
+
+Este documento explica el funcionamiento del chatbot a nivel de codigo,
+para que puedas defenderlo en tu evaluacion.
+
+================================================================================
+1. QUE ES EL CHATBOT Y QUE HACE
+================================================================================
+
+El chatbot es un asistente de soporte flotante que aparece en la esquina
+inferior derecha de la aplicacion. Puede responder preguntas sobre:
+- Inventario (stock, productos, bodegas)
+- Ordenes (pedidos, numeros de orden)
+- Envios (tracking, estados, direcciones)
+
+Funciona asi:
+1. El usuario escribe una pregunta en el widget flotante
+2. El frontend envia la pregunta al backend
+3. El backend (chatbot-service) consulta los 3 microservicios en tiempo real
+4. El backend arma un "prompt" con los datos reales del sistema + la pregunta
+5. El backend envia el prompt a Google Gemini (API de IA)
+6. Gemini responde con un texto en lenguaje natural
+7. Si Gemini falla (por ejemplo, sin cuota), el sistema usa un "fallback"
+   con respuestas predefinidas por reglas locales
+
+================================================================================
+2. ARCHIVOS QUE SE CREARON O MODIFICARON
+================================================================================
+
+--- BACKEND (NUEVO MICROSERVICIO: chatbot-service) ---
+
+SmartLogix/chatbot-service/
+|-- pom.xml                              # Maven: dependencias Spring Boot
+|-- Dockerfile                           # Docker multi-stage (igual que otros)
+|-- src/main/resources/
+|   |-- application.yml                  # Config: puerto 8085, Gemini, JWT, Eureka
+|-- src/main/java/com/smartlogix/chatbot/
+    |-- ChatbotServiceApplication.java   # Clase principal con @EnableDiscoveryClient
+    |-- config/
+    |   |-- SecurityConfig.java          # JWT stateless, rutas protegidas
+    |-- controller/
+    |   |-- ChatbotController.java        # POST /api/chat/ask
+    |-- dto/
+    |   |-- ChatRequest.java             # DTO entrada: {question: "..."}
+    |   |-- ChatResponse.java            # DTO salida: {answer: "...", source: "GEMINI"}
+    |-- security/
+    |   |-- JwtAuthenticationFilter.java # Valida token JWT (copia del patron existente)
+    |-- service/
+        |-- ChatbotService.java           # LOGICA PRINCIPAL del chatbot
+
+--- BACKEND (MODIFICADO) ---
+
+SmartLogix/pom.xml
+  - Agregado: <module>chatbot-service</module>
+
+SmartLogix/api-gateway/src/main/resources/application.yml
+  - Agregada ruta: Path=/api/chat/** -> lb://chatbot-service
+
+SmartLogix/docker-compose.yml
+  - Agregado servicio: chatbot-service (puerto 8085, healthcheck, env vars)
+  - Agregado a depends_on de api-gateway
+
+SmartLogix/inventory-service/src/main/resources/application.yml
+  - Cambiado modelo Gemini: gemini-2.0-flash -> gemini-1.5-flash
+
+--- FRONTEND (NUEVO) ---
+
+front/fron_smart_logix/src/api/chatbotApi.js
+  - Funcion: askChatbotRequest(question, auth) -> POST /api/chat/ask
+
+front/fron_smart_logix/src/service/chatbotService.js
+  - Funcion: askChatbot(question) -> pasa el JWT token a la API
+
+front/fron_smart_logix/src/pages/ChatbotWidget.jsx
+  - Componente React: widget flotante con burbujas de chat, input, loading
+
+--- FRONTEND (MODIFICADO) ---
+
+front/fron_smart_logix/src/App.jsx
+  - Importado y montado <ChatbotWidget /> globalmente (todas las paginas)
+
+front/fron_smart_logix/src/App.css
+  - Agregados estilos: .chatbot-widget, .chatbot-panel, .chatbot-messages, etc.
+
+================================================================================
+3. FLUJO COMPLETO DE UNA PREGUNTA (END-TO-END)
+================================================================================
+
+Usuario: "Hola, cuanto inventario queda?"
+
+PASO 1: FRONTEND
+----------------------------------------------------------------
+ChatbotWidget.jsx recibe la pregunta del usuario y la guarda en el estado.
+handleSend() ejecuta:
+  1. Agrega el mensaje del usuario al historial de chat
+  2. Llama a askChatbot(userText) del service
+  3. Muestra "Escribiendo..." mientras espera
+
+PASO 2: SERVICE -> API -> GATEWAY
+----------------------------------------------------------------
+chatbotService.js llama a chatbotApi.js:
+  askChatbotRequest(question, getRequiredAuthorizationHeader())
+
+chatbotApi.js hace un HTTP POST a:
+  /api/chat/ask
+  body: {question: "Hola, cuanto inventario queda?"}
+  headers: {Authorization: "Bearer eyJ..."}
+
+El navegador envia la peticion al API Gateway (localhost:8080).
+El Gateway la enruta al chatbot-service (via Eureka load balancer).
+
+PASO 3: CHATBOT-CONTROLLER (BACKEND)
+----------------------------------------------------------------
+ChatbotController.java recibe la peticion:
+  @PostMapping("/api/chat/ask")
+  public ChatResponse ask(@RequestBody ChatRequest request,
+                          @RequestHeader("Authorization") String authToken)
+
+El JwtAuthenticationFilter valida el token antes de llegar aqui.
+
+PASO 4: CHATBOT-SERVICE (LOGICA PRINCIPAL)
+----------------------------------------------------------------
+ChatbotService.ask(question, authToken) ejecuta:
+
+  1. Verifica si Gemini esta habilitado y si hay API key:
+     if (!geminiEnabled || geminiApiKey == null || geminiApiKey.isBlank())
+         -> Si falta, devuelve fallbackResponse()
+
+  2. Si hay API key, intenta el flujo completo:
+
+     a) fetchContextData(authToken):
+        - Consulta INVENTARIO: GET http://api-gateway:8080/api/inventory/items
+        - Consulta ORDENES:    GET http://api-gateway:8080/api/orders
+        - Consulta ENVIOS:     GET http://api-gateway:8080/api/shipments
+        - Cada consulta usa el JWT del usuario para autenticarse
+        - Los datos se serializan a JSON y se concatenan en un String
+
+     b) buildPrompt(question, contextData):
+        Arma un texto largo (prompt) que le dice a Gemini:
+        "Eres un asistente de soporte de SmartLogix.
+         Aqui estan los datos actuales del sistema:
+         [JSON de inventario]
+         [JSON de ordenes]
+         [JSON de envios]
+         El usuario pregunta: 'Hola, cuanto inventario queda?'
+         Responde SOLO usando estos datos. No inventes nada."
+
+     c) callGemini(prompt):
+        - Construye la URL: https://generativelanguage.googleapis.com/v1beta/
+          models/gemini-1.5-flash:generateContent?key=API_KEY
+        - Arma el body JSON con:
+            {contents: [{parts: [{text: prompt}]}],
+             generationConfig: {temperature: 0.3, maxOutputTokens: 1024}}
+        - Hace POST con RestTemplate (timeout: 15 segundos)
+        - Recibe la respuesta de Gemini (JSON anidado)
+        - Extrae el texto de: candidates[0].content.parts[0].text
+
+     d) Devuelve new ChatResponse(answer, "GEMINI")
+
+  3. Si algo falla en los pasos a, b o c (excepcion):
+     - Captura el error, loguea "Error al llamar a Gemini API: ..."
+     - Devuelve fallbackResponse(question)
+
+PASO 5: RESPUESTA AL FRONTEND
+----------------------------------------------------------------
+ChatbotWidget.jsx recibe:
+  {answer: "Tienes 120 unidades de Teclado Mecanico RGB...", source: "GEMINI"}
+
+o si fallo:
+  {answer: "Hola! Soy el asistente...", source: "RULES"}
+
+El componente agrega la respuesta al historial de mensajes.
+Muestra el badge: "IA Gemini" (azul) o "Reglas locales" (gris).
+
+================================================================================
+4. COMO FUNCIONA EL FALLBACK (PLAN B)
+================================================================================
+
+El fallback se activa automaticamente cuando:
+- No hay API key configurada (GEMINI_API_KEY vacia)
+- Gemini retorna error 429 (cuota agotada)
+- Gemini retorna error 401/403 (key invalida)
+- El contenedor Docker no tiene internet (timeout)
+- Cualquier otra excepcion en la llamada a Gemini
+
+El fallback es un metodo simple con if-else:
+
+  private ChatResponse fallbackResponse(String question) {
+      String lower = question.toLowerCase();
+      if (lower.contains("hola") || lower.contains("buenos dias")) {
+          return respuesta de saludo;
+      } else if (lower.contains("inventario") || lower.contains("stock")) {
+          return "Para consultar el inventario, ve a la pestana Inventario...";
+      } else if (lower.contains("orden")) {
+          return "Para ver las ordenes, ve a la pestana Ordenes...";
+      } else if (lower.contains("envio")) {
+          return "Para gestionar envios, ve a la pestana Envios...";
+      } else {
+          return respuesta generica orientando al menu lateral;
+      }
+  }
+
+La ventaja es que el chatbot SIEMPRE responde, nunca se queda colgado.
+El usuario puede ver si la respuesta vino de la IA real o del fallback
+gracias al indicador de fuente.
+
+================================================================================
+5. COMO FUNCIONA LA INTEGRACION CON GEMINI
+================================================================================
+
+Gemini es un modelo de lenguaje (LLM) de Google. Funciona asi:
+
+1. Tu le envias un "prompt" (texto de instrucciones + datos + pregunta)
+2. El modelo "lee" el texto, analiza los datos, y genera una respuesta
+3. La respuesta es texto libre, en lenguaje natural
+
+En el proyecto, el prompt que se envia es algo como:
+
+------------------------------------------------------------------------
+Eres un asistente de soporte tecnico de la plataforma SmartLogix.
+
+=== DATOS ACTUALES DEL SISTEMA ===
+
+-- INVENTARIO --
+[{"sku":"SKU-1001","productName":"Teclado Mecanico RGB",...}]
+
+-- ORDENES --
+[{"orderNumber":"ORD-001","lines":[...],...}]
+
+-- ENVIOS --
+[{"trackingCode":"TRK-001","status":"IN_TRANSIT",...}]
+
+El usuario pregunta: "Hola, cuanto inventario queda?"
+
+Instrucciones:
+- Responde SOLO usando los datos del sistema proporcionados arriba.
+- Si no tienes la informacion, di que no tienes acceso.
+- Responde en español, de forma clara y profesional.
+- No inventes datos.
+
+Respuesta:
+------------------------------------------------------------------------
+
+Gemini analiza el JSON de inventario y responde algo como:
+"Tienes 120 unidades disponibles del Teclado Mecanico RGB (SKU-1001)
+ en la bodega WH-SCL-01. Tambien hay 200 unidades del Mouse
+ Inalambrico (SKU-2001)..."
+
+Esto es IA REAL porque:
+- El modelo genera el texto en tiempo real
+- No es una respuesta predefinida (a diferencia del fallback)
+- Usa los datos ACTUALES del sistema (que varian segun el momento)
+- Cada respuesta es unica y personalizada
+
+================================================================================
+6. POR QUE SE USA UN NUEVO MICROSERVICIO
+================================================================================
+
+Segun los requisitos del profesor, cada nueva funcionalidad debe reflejarse
+en la arquitectura de microservicios. El chatbot es un dominio nuevo porque:
+
+- Tiene su propia logica de negocio (IA + prompt engineering)
+- No pertenece a inventario, ordenes ni envios (son dominios separados)
+- Se registra independientemente en Eureka
+- Tiene su propio healthcheck, puerto y configuracion
+- Puede escalarse por separado si recibe mucho trafico
+
+Arquitectura con el chatbot:
+  Navegador -> API Gateway (8080)
+      |
+      +-- auth-service (login/register)
+      +-- inventory-service (stock, disponibilidad)
+      +-- order-service (ordenes, pedidos)
+      +-- shipment-service (envios, tracking)
+      +-- chatbot-service (IA, soporte)  <-- NUEVO
+
+================================================================================
+7. COMO SE COMUNICAN LOS MICROSERVICIOS ENTRE SI
+================================================================================
+
+El chatbot-service necesita datos de otros microservicios. Como todos estan
+en contenedores Docker, NO puede usar "localhost" porque cada contenedor
+es su propia maquina.
+
+Solucion: el chatbot consulta a los otros microservicios a traves del
+API Gateway, usando la red interna de Docker Compose:
+
+  chatbot-service -> http://api-gateway:8080/api/inventory/items
+  chatbot-service -> http://api-gateway:8080/api/orders
+  chatbot-service -> http://api-gateway:8080/api/shipments
+
+El hostname "api-gateway" se resuelve gracias a la red interna de Docker.
+La variable de entorno API_GATEWAY_URL se configura en docker-compose.yml:
+  API_GATEWAY_URL=http://api-gateway:8080
+
+Cada peticion lleva el JWT del usuario original, asi que el Gateway
+autentica y enruta correctamente.
+
+================================================================================
+8. COMO FUNCIONA EL WIDGET FLOTANTE EN EL FRONTEND
+================================================================================
+
+ChatbotWidget.jsx es un componente React que usa:
+
+- useState: para manejar el estado del chat (abierto/cerrado, mensajes, input)
+- useRef: para hacer auto-scroll al final de los mensajes
+- useEffect: para scrollear cuando llega un nuevo mensaje
+
+Estructura del componente:
+  <div className="chatbot-widget">       <- Contenedor fijo (position: fixed)
+    {open && (
+      <div className="chatbot-panel">    <- Panel de chat (se abre/cierra)
+        <div className="chatbot-header">  <- Titulo "Asistente SmartLogix"
+        <div className="chatbot-messages"> <- Lista de mensajes (burbujas)
+        <form className="chatbot-form">   <- Input de texto + boton Enviar
+      </div>
+    )}
+    <button className="chatbot-toggle">   <- Boton circular "?" (siempre visible)
+  </div>
+
+El widget se monta en App.jsx, por fuera del router, asi que aparece
+en TODAS las paginas (Inventario, Ordenes, Envios) sin importar la ruta.
+
+CSS clave:
+  .chatbot-widget { position: fixed; bottom: 20px; right: 20px; z-index: 9999; }
+  Esto lo fija en la esquina inferior derecha, por encima de todo.
+
+================================================================================
+9. COMO SE MUESTRA EL INDICADOR DE FUENTE (IA vs FALLBACK)
+================================================================================
+
+El backend envia el campo "source" en la respuesta:
+  - "GEMINI"  -> respuesta generada por la IA
+  - "RULES"   -> respuesta del fallback
+
+El frontend lee el source de la primera recomendacion (o del mensaje del bot)
+y muestra un badge:
+  <span className="badge badge--gemini">IA Gemini</span>     (azul)
+  <span className="badge badge--rules">Reglas locales</span> (gris)
+
+Esto permite que el usuario (y el profesor) vea claramente si la respuesta
+vino de la IA real o del fallback.
+
+================================================================================
+10. COMO SE CONFIGURA LA API KEY DE GEMINI
+================================================================================
+
+Hay dos formas de pasar la API key:
+
+FORMA A: Variable de entorno en PowerShell (recomendada para pruebas)
+  $env:GEMINI_API_KEY="AIzaSy...TU_KEY..."
+  docker-compose up --build -d
+
+FORMA B: Archivo .env dentro de la carpeta SmartLogix/
+  GEMINI_API_KEY=AIzaSy...TU_KEY...
+  docker-compose up --build -d
+
+Docker Compose lee automaticamente el archivo .env y pasa las variables
+a los contenedores.
+
+La variable llega al chatbot-service via docker-compose.yml:
+  environment:
+    - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+
+El chatbot-service la lee desde application.yml:
+  gemini:
+    api:
+      key: ${GEMINI_API_KEY:}
+
+================================================================================
+11. COMO SE HIZO EL BUILD EN DOCKER
+================================================================================
+
+El Dockerfile del chatbot-service sigue el mismo patron que los otros:
+
+Stage 1 (Build):
+  - FROM eclipse-temurin:17-jdk
+  - Copia todo el proyecto
+  - Ejecuta: ./mvnw -q -DskipTests -pl chatbot-service -am package
+  - Esto compila solo el chatbot-service y sus dependencias (parent POM)
+
+Stage 2 (Runtime):
+  - FROM eclipse-temurin:17-jre (mas liviano, sin JDK completo)
+  - Copia el JAR generado: chatbot-service-1.0.0.jar
+  - Instala curl para el healthcheck
+  - Expone puerto 8085
+  - ENTRYPOINT: java -jar /app/app.jar
+
+Cuando ejecutas docker-compose up --build -d:
+  1. Docker detecta que el Dockerfile de chatbot-service cambio
+  2. Recompila el microservicio desde el codigo fuente
+  3. Crea una nueva imagen: smartlogix/chatbot-service:latest
+  4. Levanta el contenedor con healthcheck cada 15 segundos
+
+================================================================================
+12. RESUMEN PARA LA DEFENSA DEL PROYECTO
+================================================================================
+
+Cuando el profesor te pregunte, puedes explicar asi:
+
+"Implemente un chatbot de soporte con IA como un nuevo microservicio.
+El frontend tiene un widget flotante que envia preguntas al backend.
+
+El backend (chatbot-service) consulta en tiempo real los datos de
+inventario, ordenes y envios a traves del API Gateway. Con esos datos
+arma un prompt y lo envia a Google Gemini. Gemini analiza la informacion
+y genera una respuesta personalizada en lenguaje natural.
+
+Si Gemini no esta disponible (por ejemplo, sin cuota gratuita), el sistema
+cae automaticamente a un fallback con respuestas predefinidas. El usuario
+puede ver si la respuesta vino de la IA o del fallback gracias a un
+indicador de fuente.
+
+El microservicio se registra en Eureka, tiene healthcheck, JWT validation,
+y se integra al docker-compose existente. Es escalable independientemente
+porque es un dominio separado."
+
+================================================================================
+FIN DEL DOCUMENTO
+================================================================================
