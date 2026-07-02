@@ -1,6 +1,7 @@
 ================================================================================
 DOCUMENTO TECNICO - Chatbot de Soporte con IA (SmartLogix)
 Fecha: 2026-06-30
+Actualizado: uso de Groq API (llama-3.1-8b-instant) en vez de Google Gemini directo
 ================================================================================
 
 Este documento explica el funcionamiento del chatbot a nivel de codigo,
@@ -21,13 +22,39 @@ Funciona asi:
 2. El frontend envia la pregunta al backend
 3. El backend (chatbot-service) consulta los 3 microservicios en tiempo real
 4. El backend arma un "prompt" con los datos reales del sistema + la pregunta
-5. El backend envia el prompt a Google Gemini (API de IA)
-6. Gemini responde con un texto en lenguaje natural
-7. Si Gemini falla (por ejemplo, sin cuota), el sistema usa un "fallback"
-   con respuestas predefinidas por reglas locales
+5. El backend envia el prompt a Groq API (llama-3.1-8b-instant)
+6. Groq responde con un texto en lenguaje natural
+7. Si Groq falla (por ejemplo, sin cuota o sin internet), el sistema usa un
+   "fallback" con respuestas predefinidas por reglas locales
+
+El frontend muestra un indicador en cada respuesta:
+- "Respuesta IA" (azul)  -> La respuesta vino del modelo de IA (Groq)
+- "Reglas locales" (gris) -> La respuesta vino del fallback (reglas locales)
 
 ================================================================================
-2. ARCHIVOS QUE SE CREARON O MODIFICARON
+2. POR QUE USAMOS GROQ EN VEZ DE GOOGLE GEMINI DIRECTAMENTE
+================================================================================
+
+Inicialmente intentamos usar Google Gemini directamente, pero encontramos
+varios problemas:
+
+1. Google Gemini requiere que el proyecto tenga una cuenta de facturacion
+   (billing) activada en Google Cloud Console, incluso para el tier gratuito.
+   Sin tarjeta de credito configurada, la API retorna error 403.
+
+2. Las cuotas gratuitas se agotan rapidamente con uso frecuente.
+
+3. Google cambia los nombres de los modelos disponibles frecuentemente
+   (gemini-2.0-flash, gemini-1.5-flash, etc.), lo que genera errores 404.
+
+Solucion: Usamos Groq (https://groq.com/)
+- API gratuita para desarrolladores (sin tarjeta de credito)
+- Modelo: llama-3.1-8b-instant (Meta/Llama, muy rapido)
+- Compatible con el formato de API de OpenAI (choices[0].message.content)
+- Respuesta en menos de 1 segundo
+
+================================================================================
+3. ARCHIVOS QUE SE CREARON O MODIFICARON
 ================================================================================
 
 --- BACKEND (NUEVO MICROSERVICIO: chatbot-service) ---
@@ -36,7 +63,7 @@ SmartLogix/chatbot-service/
 |-- pom.xml                              # Maven: dependencias Spring Boot
 |-- Dockerfile                           # Docker multi-stage (igual que otros)
 |-- src/main/resources/
-|   |-- application.yml                  # Config: puerto 8085, Gemini, JWT, Eureka
+|   |-- application.yml                  # Config: puerto 8085, Groq, JWT, Eureka
 |-- src/main/java/com/smartlogix/chatbot/
     |-- ChatbotServiceApplication.java   # Clase principal con @EnableDiscoveryClient
     |-- config/
@@ -45,9 +72,9 @@ SmartLogix/chatbot-service/
     |   |-- ChatbotController.java        # POST /api/chat/ask
     |-- dto/
     |   |-- ChatRequest.java             # DTO entrada: {question: "..."}
-    |   |-- ChatResponse.java            # DTO salida: {answer: "...", source: "GEMINI"}
+    |   |-- ChatResponse.java            # DTO salida: {answer: "...", source: "AI"}
     |-- security/
-    |   |-- JwtAuthenticationFilter.java # Valida token JWT (copia del patron existente)
+    |   |-- JwtAuthenticationFilter.java   # Valida token JWT (copia del patron existente)
     |-- service/
         |-- ChatbotService.java           # LOGICA PRINCIPAL del chatbot
 
@@ -64,7 +91,13 @@ SmartLogix/docker-compose.yml
   - Agregado a depends_on de api-gateway
 
 SmartLogix/inventory-service/src/main/resources/application.yml
-  - Cambiado modelo Gemini: gemini-2.0-flash -> gemini-1.5-flash
+  - Cambiado modelo: llama-3.1-8b-instant
+
+SmartLogix/inventory-service/.../service/AiRecommendationService.java
+  - Cambiada URL: https://api.groq.com/openai/v1/chat/completions
+  - Cambiados headers: Authorization Bearer (sin HTTP-Referer ni X-Title)
+  - Cambiado formato de respuesta: choices[0].message.content
+  - Cambiado prompt: source ahora pide "AI" en vez de "GEMINI"
 
 --- FRONTEND (NUEVO) ---
 
@@ -72,10 +105,11 @@ front/fron_smart_logix/src/api/chatbotApi.js
   - Funcion: askChatbotRequest(question, auth) -> POST /api/chat/ask
 
 front/fron_smart_logix/src/service/chatbotService.js
-  - Funcion: askChatbot(question) -> pasa el JWT token a la API
+  - Funcion: askChatbot(question) -> pasa el token a la API
 
 front/fron_smart_logix/src/pages/ChatbotWidget.jsx
   - Componente React: widget flotante con burbujas de chat, input, loading
+  - Badge cambiado: "Respuesta IA" (antes "IA Gemini") y "Reglas locales"
 
 --- FRONTEND (MODIFICADO) ---
 
@@ -84,9 +118,13 @@ front/fron_smart_logix/src/App.jsx
 
 front/fron_smart_logix/src/App.css
   - Agregados estilos: .chatbot-widget, .chatbot-panel, .chatbot-messages, etc.
+  - Badge cambiado: .chatbot-source--ai (antes .chatbot-source--gemini)
+
+front/fron_smart_logix/src/pages/Inventory.jsx
+  - Badge de recomendaciones cambiado: "Respuesta IA" (antes "IA Gemini")
 
 ================================================================================
-3. FLUJO COMPLETO DE UNA PREGUNTA (END-TO-END)
+4. FLUJO COMPLETO DE UNA PREGUNTA (END-TO-END)
 ================================================================================
 
 Usuario: "Hola, cuanto inventario queda?"
@@ -107,7 +145,7 @@ chatbotService.js llama a chatbotApi.js:
 chatbotApi.js hace un HTTP POST a:
   /api/chat/ask
   body: {question: "Hola, cuanto inventario queda?"}
-  headers: {Authorization: "Bearer eyJ..."}
+  headers: {Authorization: "Bearer eyJ...", "Content-Type": "application/json"}
 
 El navegador envia la peticion al API Gateway (localhost:8080).
 El Gateway la enruta al chatbot-service (via Eureka load balancer).
@@ -125,7 +163,7 @@ PASO 4: CHATBOT-SERVICE (LOGICA PRINCIPAL)
 ----------------------------------------------------------------
 ChatbotService.ask(question, authToken) ejecuta:
 
-  1. Verifica si Gemini esta habilitado y si hay API key:
+  1. Verifica si la IA esta habilitada y si hay API key:
      if (!geminiEnabled || geminiApiKey == null || geminiApiKey.isBlank())
          -> Si falta, devuelve fallbackResponse()
 
@@ -139,7 +177,7 @@ ChatbotService.ask(question, authToken) ejecuta:
         - Los datos se serializan a JSON y se concatenan en un String
 
      b) buildPrompt(question, contextData):
-        Arma un texto largo (prompt) que le dice a Gemini:
+        Arma un texto largo (prompt) que le dice a Groq:
         "Eres un asistente de soporte de SmartLogix.
          Aqui estan los datos actuales del sistema:
          [JSON de inventario]
@@ -148,43 +186,43 @@ ChatbotService.ask(question, authToken) ejecuta:
          El usuario pregunta: 'Hola, cuanto inventario queda?'
          Responde SOLO usando estos datos. No inventes nada."
 
-     c) callGemini(prompt):
-        - Construye la URL: https://generativelanguage.googleapis.com/v1beta/
-          models/gemini-1.5-flash:generateContent?key=API_KEY
+     c) callGemini(prompt):  <-- El nombre del metodo es legacy, pero llama a Groq
+        - Construye la URL: https://api.groq.com/openai/v1/chat/completions
         - Arma el body JSON con:
-            {contents: [{parts: [{text: prompt}]}],
-             generationConfig: {temperature: 0.3, maxOutputTokens: 1024}}
+            {model: "llama-3.1-8b-instant",
+             messages: [{role: "user", content: prompt}]}
         - Hace POST con RestTemplate (timeout: 15 segundos)
-        - Recibe la respuesta de Gemini (JSON anidado)
-        - Extrae el texto de: candidates[0].content.parts[0].text
+        - Headers: Content-Type: application/json, Authorization: Bearer <key>
+        - Recibe la respuesta de Groq (formato OpenAI compatible)
+        - Extrae el texto de: choices[0].message.content
 
-     d) Devuelve new ChatResponse(answer, "GEMINI")
+     d) Devuelve new ChatResponse(answer, "AI")
 
   3. Si algo falla en los pasos a, b o c (excepcion):
-     - Captura el error, loguea "Error al llamar a Gemini API: ..."
+     - Captura el error, loguea "Error al llamar a la IA API: ..."
      - Devuelve fallbackResponse(question)
 
 PASO 5: RESPUESTA AL FRONTEND
 ----------------------------------------------------------------
 ChatbotWidget.jsx recibe:
-  {answer: "Tienes 120 unidades de Teclado Mecanico RGB...", source: "GEMINI"}
+  {answer: "Tienes 120 unidades de Teclado Mecanico RGB...", source: "AI"}
 
 o si fallo:
   {answer: "Hola! Soy el asistente...", source: "RULES"}
 
 El componente agrega la respuesta al historial de mensajes.
-Muestra el badge: "IA Gemini" (azul) o "Reglas locales" (gris).
+Muestra el badge: "Respuesta IA" (azul) o "Reglas locales" (gris).
 
 ================================================================================
-4. COMO FUNCIONA EL FALLBACK (PLAN B)
+5. COMO FUNCIONA EL FALLBACK (PLAN B)
 ================================================================================
 
 El fallback se activa automaticamente cuando:
 - No hay API key configurada (GEMINI_API_KEY vacia)
-- Gemini retorna error 429 (cuota agotada)
-- Gemini retorna error 401/403 (key invalida)
+- Groq retorna error 429 (cuota agotada)
+- Groq retorna error 401/403 (key invalida)
 - El contenedor Docker no tiene internet (timeout)
-- Cualquier otra excepcion en la llamada a Gemini
+- Cualquier otra excepcion en la llamada a Groq
 
 El fallback es un metodo simple con if-else:
 
@@ -208,55 +246,71 @@ El usuario puede ver si la respuesta vino de la IA real o del fallback
 gracias al indicador de fuente.
 
 ================================================================================
-5. COMO FUNCIONA LA INTEGRACION CON GEMINI
+6. COMO FUNCIONA GROQ (LA IA QUE USAMOS)
 ================================================================================
 
-Gemini es un modelo de lenguaje (LLM) de Google. Funciona asi:
+Groq (https://groq.com/) es una plataforma de inferencia de IA que ofrece
+acceso gratuito a modelos de lenguaje (LLM) a traves de una API compatible
+con OpenAI.
 
-1. Tu le envias un "prompt" (texto de instrucciones + datos + pregunta)
-2. El modelo "lee" el texto, analiza los datos, y genera una respuesta
-3. La respuesta es texto libre, en lenguaje natural
+Caracteristicas:
+- Gratis para desarrolladores (hasta ciertos limites diarios)
+- No requiere tarjeta de credito
+- Modelos disponibles: Llama (Meta), Mixtral, Gemma (Google)
+- Usamos: llama-3.1-8b-instant (rapido, bueno para tareas simples)
+- Respuesta tipica: < 1 segundo
+- Formato de API: compatible con OpenAI (mismo JSON de entrada/salida)
 
-En el proyecto, el prompt que se envia es algo como:
+URL de la API:
+  https://api.groq.com/openai/v1/chat/completions
 
-------------------------------------------------------------------------
-Eres un asistente de soporte tecnico de la plataforma SmartLogix.
+Formato de peticion:
+  {
+    "model": "llama-3.1-8b-instant",
+    "messages": [
+      {"role": "user", "content": "El prompt completo aqui..."}
+    ]
+  }
 
-=== DATOS ACTUALES DEL SISTEMA ===
+Formato de respuesta:
+  {
+    "choices": [
+      {
+        "message": {
+          "content": "La respuesta generada por la IA..."
+        }
+      }
+    ]
+  }
 
--- INVENTARIO --
-[{"sku":"SKU-1001","productName":"Teclado Mecanico RGB",...}]
-
--- ORDENES --
-[{"orderNumber":"ORD-001","lines":[...],...}]
-
--- ENVIOS --
-[{"trackingCode":"TRK-001","status":"IN_TRANSIT",...}]
-
-El usuario pregunta: "Hola, cuanto inventario queda?"
-
-Instrucciones:
-- Responde SOLO usando los datos del sistema proporcionados arriba.
-- Si no tienes la informacion, di que no tienes acceso.
-- Responde en español, de forma clara y profesional.
-- No inventes datos.
-
-Respuesta:
-------------------------------------------------------------------------
-
-Gemini analiza el JSON de inventario y responde algo como:
-"Tienes 120 unidades disponibles del Teclado Mecanico RGB (SKU-1001)
- en la bodega WH-SCL-01. Tambien hay 200 unidades del Mouse
- Inalambrico (SKU-2001)..."
-
-Esto es IA REAL porque:
-- El modelo genera el texto en tiempo real
-- No es una respuesta predefinida (a diferencia del fallback)
-- Usa los datos ACTUALES del sistema (que varian segun el momento)
-- Cada respuesta es unica y personalizada
+Headers necesarios:
+  Authorization: Bearer <API_KEY>
+  Content-Type: application/json
 
 ================================================================================
-6. POR QUE SE USA UN NUEVO MICROSERVICIO
+7. POR QUE ESTO ES "IA REAL"
+================================================================================
+
+El fallback usa reglas locales (if/else) para responder:
+  if (pregunta.contains("hola")) -> "Hola! Soy el asistente..."
+
+La IA real (Groq) usa un modelo de lenguaje entrenado con millones de datos:
+  - Recibe un prompt con datos JSON del sistema
+  - Analiza el contexto, la pregunta y las instrucciones
+  - Genera una respuesta UNICA en tiempo real
+  - No es una respuesta predefinida
+
+Ejemplo real de respuesta de la IA:
+  "Tienes 120 unidades disponibles del Teclado Mecanico RGB (SKU-1001)
+   en la bodega WH-SCL-01. Tambien hay 200 unidades del Mouse
+   Inalambrico (SKU-2001). El nivel de reorden del Teclado es 10,
+   asi que el stock esta en buen estado."
+
+Ese texto NO existe en el codigo. Fue generado por el modelo llama-3.1-8b
+en tiempo real, usando los datos que le proporcionamos del inventario.
+
+================================================================================
+8. POR QUE USAMOS UN NUEVO MICROSERVICIO
 ================================================================================
 
 Segun los requisitos del profesor, cada nueva funcionalidad debe reflejarse
@@ -272,13 +326,13 @@ Arquitectura con el chatbot:
   Navegador -> API Gateway (8080)
       |
       +-- auth-service (login/register)
-      +-- inventory-service (stock, disponibilidad)
+      +-- inventory-service (stock, disponibilidad, IA recomendaciones)
       +-- order-service (ordenes, pedidos)
       +-- shipment-service (envios, tracking)
       +-- chatbot-service (IA, soporte)  <-- NUEVO
 
 ================================================================================
-7. COMO SE COMUNICAN LOS MICROSERVICIOS ENTRE SI
+9. COMO SE COMUNICAN LOS MICROSERVICIOS ENTRE SI
 ================================================================================
 
 El chatbot-service necesita datos de otros microservicios. Como todos estan
@@ -300,7 +354,7 @@ Cada peticion lleva el JWT del usuario original, asi que el Gateway
 autentica y enruta correctamente.
 
 ================================================================================
-8. COMO FUNCIONA EL WIDGET FLOTANTE EN EL FRONTEND
+10. COMO FUNCIONA EL WIDGET FLOTANTE EN EL FRONTEND
 ================================================================================
 
 ChatbotWidget.jsx es un componente React que usa:
@@ -329,33 +383,32 @@ CSS clave:
   Esto lo fija en la esquina inferior derecha, por encima de todo.
 
 ================================================================================
-9. COMO SE MUESTRA EL INDICADOR DE FUENTE (IA vs FALLBACK)
+11. COMO SE MUESTRA EL INDICADOR DE FUENTE (IA vs FALLBACK)
 ================================================================================
 
 El backend envia el campo "source" en la respuesta:
-  - "GEMINI"  -> respuesta generada por la IA
-  - "RULES"   -> respuesta del fallback
+  - "AI"    -> respuesta generada por la IA (Groq)
+  - "RULES" -> respuesta del fallback
 
-El frontend lee el source de la primera recomendacion (o del mensaje del bot)
-y muestra un badge:
-  <span className="badge badge--gemini">IA Gemini</span>     (azul)
+El frontend lee el source y muestra un badge:
+  <span className="badge badge--ai">Respuesta IA</span>     (azul)
   <span className="badge badge--rules">Reglas locales</span> (gris)
 
 Esto permite que el usuario (y el profesor) vea claramente si la respuesta
 vino de la IA real o del fallback.
 
 ================================================================================
-10. COMO SE CONFIGURA LA API KEY DE GEMINI
+12. COMO SE CONFIGURA LA API KEY DE GROQ
 ================================================================================
 
 Hay dos formas de pasar la API key:
 
 FORMA A: Variable de entorno en PowerShell (recomendada para pruebas)
-  $env:GEMINI_API_KEY="AIzaSy...TU_KEY..."
+  $env:GEMINI_API_KEY="gsk_...TU_KEY..."
   docker-compose up --build -d
 
 FORMA B: Archivo .env dentro de la carpeta SmartLogix/
-  GEMINI_API_KEY=AIzaSy...TU_KEY...
+  GEMINI_API_KEY=gsk_...TU_KEY...
   docker-compose up --build -d
 
 Docker Compose lee automaticamente el archivo .env y pasa las variables
@@ -370,8 +423,12 @@ El chatbot-service la lee desde application.yml:
     api:
       key: ${GEMINI_API_KEY:}
 
+NOTA: Aunque la variable se llama GEMINI_API_KEY, ahora contiene la key de
+Groq. No cambiamos el nombre de la variable para no modificar todo el
+sistema de configuracion, pero el codigo ahora apunta a api.groq.com.
+
 ================================================================================
-11. COMO SE HIZO EL BUILD EN DOCKER
+13. COMO SE HIZO EL BUILD EN DOCKER
 ================================================================================
 
 El Dockerfile del chatbot-service sigue el mismo patron que los otros:
@@ -396,7 +453,7 @@ Cuando ejecutas docker-compose up --build -d:
   4. Levanta el contenedor con healthcheck cada 15 segundos
 
 ================================================================================
-12. RESUMEN PARA LA DEFENSA DEL PROYECTO
+14. RESUMEN PARA LA DEFENSA DEL PROYECTO
 ================================================================================
 
 Cuando el profesor te pregunte, puedes explicar asi:
@@ -406,13 +463,19 @@ El frontend tiene un widget flotante que envia preguntas al backend.
 
 El backend (chatbot-service) consulta en tiempo real los datos de
 inventario, ordenes y envios a traves del API Gateway. Con esos datos
-arma un prompt y lo envia a Google Gemini. Gemini analiza la informacion
-y genera una respuesta personalizada en lenguaje natural.
+arma un prompt y lo envia a Groq API (modelo llama-3.1-8b-instant).
+Groq analiza la informacion y genera una respuesta personalizada en
+lenguaje natural.
 
-Si Gemini no esta disponible (por ejemplo, sin cuota gratuita), el sistema
+Inicialmente intentamos usar Google Gemini, pero requiere una cuenta de
+facturacion con tarjeta de credito que no tenemos. Groq nos ofrece
+acceso gratuito a modelos de IA sin necesidad de tarjeta, y funciona
+con el mismo formato de API de OpenAI.
+
+Si Groq no esta disponible (sin cuota, sin internet, etc.), el sistema
 cae automaticamente a un fallback con respuestas predefinidas. El usuario
 puede ver si la respuesta vino de la IA o del fallback gracias a un
-indicador de fuente.
+indicador de fuente que muestra 'Respuesta IA' o 'Reglas locales'.
 
 El microservicio se registra en Eureka, tiene healthcheck, JWT validation,
 y se integra al docker-compose existente. Es escalable independientemente

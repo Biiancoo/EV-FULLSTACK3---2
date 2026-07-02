@@ -481,7 +481,7 @@ code {
   letter-spacing: .04em;
 }
 
-.chatbot-source--gemini { background: #dbeafe; color: #1e40af; }
+.chatbot-source--ai     { background: #dbeafe; color: #1e40af; }
 .chatbot-source--rules  { background: #f1f5f9; color: #475569; }
 .chatbot-source--error  { background: #fee2e2; color: #991b1b; }
 

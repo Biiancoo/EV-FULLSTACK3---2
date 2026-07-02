@@ -152,7 +152,7 @@ function InventoryPage() {
             <h3 style={{ color: "#a78bfa" }}>Analisis Inteligente de Inventario</h3>
             {recSource && (
               <span className={`badge badge--${recSource.toLowerCase()}`}>
-                {recSource === "GEMINI" ? "IA Gemini" : "Reglas locales"}
+                {recSource === "AI" ? "Respuesta IA" : "Reglas locales"}
               </span>
             )}
           </div>

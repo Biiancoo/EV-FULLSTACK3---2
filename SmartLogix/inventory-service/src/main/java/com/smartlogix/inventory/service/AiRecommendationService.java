@@ -61,29 +61,27 @@ public class AiRecommendationService {
 
         String prompt = buildPrompt(items);
 
-        String url = String.format(
-                "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
-                geminiModel, geminiApiKey);
+        String url = "https://api.groq.com/openai/v1/chat/completions";
+
+        log.info("Llamando a Groq API con modelo: {}", geminiModel);
 
         Map<String, Object> body = Map.of(
-                "contents", List.of(Map.of(
-                        "parts", List.of(Map.of("text", prompt))
-                )),
-                "generationConfig", Map.of(
-                        "temperature", 0.2,
-                        "maxOutputTokens", 2048,
-                        "responseMimeType", "application/json"
-                )
+                "model", geminiModel,
+                "messages", List.of(Map.of(
+                        "role", "user",
+                        "content", prompt
+                ))
         );
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("Authorization", "Bearer " + geminiApiKey);
         HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
 
         Map<String, Object> response = restTemplate.postForObject(url, request, Map.class);
 
         String rawJson = extractTextFromResponse(response);
-        log.debug("Respuesta cruda de Gemini: {}", rawJson);
+        log.debug("Respuesta cruda de Groq: {}", rawJson);
 
         // Limpiar posibles markdown ```json ... ```
         String cleanJson = rawJson.replaceAll("(?s)```json\\s*", "").replaceAll("(?s)\\s*```", "").trim();
@@ -102,7 +100,7 @@ public class AiRecommendationService {
                 r.urgency(),
                 r.reason(),
                 now,
-                r.source() != null ? r.source() : "GEMINI"
+                r.source() != null ? r.source() : "AI"
         )).toList();
     }
 
@@ -129,7 +127,7 @@ public class AiRecommendationService {
                 + "Formato exacto de cada objeto del array:\n");
         sb.append("{\"sku\":\"...\",\"productName\":\"...\",\"warehouseCode\":\"...\",\"currentStock\":N,"
                 + "\"reservedStock\":N,\"reorderLevel\":N,\"recommendedQuantity\":N,"
-                + "\"urgency\":\"CRITICAL|HIGH|MEDIUM|LOW\",\"reason\":\"...\",\"source\":\"GEMINI\"}\n");
+                + "\"urgency\":\"CRITICAL|HIGH|MEDIUM|LOW\",\"reason\":\"...\",\"source\":\"AI\"}\n");
         sb.append("\nRazona como un experto de logistica y da recomendaciones realistas.");
 
         return sb.toString();
@@ -138,18 +136,18 @@ public class AiRecommendationService {
     @SuppressWarnings("unchecked")
     private String extractTextFromResponse(Map<String, Object> response) {
         if (response == null) {
-            throw new RuntimeException("Respuesta vacia de Gemini");
+            throw new RuntimeException("Respuesta vacia de OpenRouter");
         }
-        List<Map<String, Object>> candidates = (List<Map<String, Object>>) response.get("candidates");
-        if (candidates == null || candidates.isEmpty()) {
-            throw new RuntimeException("No hay candidates en respuesta de Gemini");
+        List<Map<String, Object>> choices = (List<Map<String, Object>>) response.get("choices");
+        if (choices == null || choices.isEmpty()) {
+            throw new RuntimeException("No hay choices en respuesta de OpenRouter");
         }
-        Map<String, Object> content = (Map<String, Object>) candidates.get(0).get("content");
-        List<Map<String, Object>> parts = (List<Map<String, Object>>) content.get("parts");
-        if (parts == null || parts.isEmpty()) {
-            throw new RuntimeException("No hay parts en respuesta de Gemini");
+        Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
+        if (message == null) {
+            throw new RuntimeException("No hay message en choice de OpenRouter");
         }
-        return (String) parts.get(0).get("text");
+        String content = (String) message.get("content");
+        return content != null ? content.trim() : "";
     }
 
     private record RawRecommendation(

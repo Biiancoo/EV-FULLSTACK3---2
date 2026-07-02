@@ -56,8 +56,8 @@ public class ChatbotService {
             String contextData = fetchContextData(authToken);
             String prompt = buildPrompt(question, contextData);
             String answer = callGemini(prompt);
-            log.info("Respuesta de Gemini recibida correctamente.");
-            return new ChatResponse(answer, "GEMINI");
+            log.info("Respuesta de la IA recibida correctamente.");
+            return new ChatResponse(answer, "AI");
         } catch (Exception e) {
             log.warn("Error al llamar a Gemini API: {}. Usando fallback.", e.getMessage(), e);
             return fallbackResponse(question);
@@ -122,47 +122,43 @@ public class ChatbotService {
     }
 
     private String callGemini(String prompt) throws Exception {
-        String url = String.format(
-                "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
-                geminiModel, geminiApiKey);
+        String url = "https://api.groq.com/openai/v1/chat/completions";
 
-        log.info("Llamando a Gemini API: modelo={}, url (truncada)...", geminiModel);
+        log.info("Llamando a Groq API con modelo: {}", geminiModel);
 
         Map<String, Object> body = Map.of(
-                "contents", List.of(Map.of(
-                        "parts", List.of(Map.of("text", prompt))
-                )),
-                "generationConfig", Map.of(
-                        "temperature", 0.3,
-                        "maxOutputTokens", 1024
-                )
+                "model", geminiModel,
+                "messages", List.of(Map.of(
+                        "role", "user",
+                        "content", prompt
+                ))
         );
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("Authorization", "Bearer " + geminiApiKey);
         HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
 
         Map<String, Object> response = restTemplate.postForObject(url, request, Map.class);
-        log.debug("Respuesta cruda de Gemini recibida.");
+        log.debug("Respuesta cruda de Groq: {}", response);
         return extractTextFromResponse(response);
     }
 
     @SuppressWarnings("unchecked")
     private String extractTextFromResponse(Map<String, Object> response) {
         if (response == null) {
-            throw new RuntimeException("Respuesta vacia de Gemini");
+            throw new RuntimeException("Respuesta vacia de Groq");
         }
-        List<Map<String, Object>> candidates = (List<Map<String, Object>>) response.get("candidates");
-        if (candidates == null || candidates.isEmpty()) {
-            throw new RuntimeException("No hay candidates en respuesta de Gemini");
+        List<Map<String, Object>> choices = (List<Map<String, Object>>) response.get("choices");
+        if (choices == null || choices.isEmpty()) {
+            throw new RuntimeException("No hay choices en respuesta de Groq");
         }
-        Map<String, Object> content = (Map<String, Object>) candidates.get(0).get("content");
-        List<Map<String, Object>> parts = (List<Map<String, Object>>) content.get("parts");
-        if (parts == null || parts.isEmpty()) {
-            throw new RuntimeException("No hay parts en respuesta de Gemini");
+        Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
+        if (message == null) {
+            throw new RuntimeException("No hay message en choice de Groq");
         }
-        String text = (String) parts.get(0).get("text");
-        return text != null ? text.trim() : "";
+        String content = (String) message.get("content");
+        return content != null ? content.trim() : "";
     }
 
     private ChatResponse fallbackResponse(String question) {

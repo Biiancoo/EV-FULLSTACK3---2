@@ -54,7 +54,7 @@ function ChatbotWidget() {
                   {msg.text}
                   {msg.source && (
                     <span className={`chatbot-source chatbot-source--${msg.source.toLowerCase()}`}>
-                      {msg.source === "GEMINI" ? "IA Gemini" : msg.source === "RULES" ? "Reglas locales" : msg.source}
+                      {msg.source === "AI" ? "Respuesta IA" : msg.source === "RULES" ? "Reglas locales" : msg.source}
                     </span>
                   )}
                 </div>

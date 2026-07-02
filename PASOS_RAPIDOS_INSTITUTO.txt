@@ -1,0 +1,79 @@
+================================================================================
+PASOS RAPIDOS PARA LEVANTAR SMARTLOGIX EN EL INSTITUTO
+================================================================================
+
+Copia y pega estos comandos en PowerShell (o CMD/Git Bash).
+
+================================================================================
+1. PREPARAR VARIABLE DE ENTORNO (API KEY DE GROQ)
+================================================================================
+
+$env:GEMINI_API_KEY="TU_API_KEY_DE_GROQ_AQUI"
+
+Verificar que quedo guardada:
+echo $env:GEMINI_API_KEY
+
+================================================================================
+2. LEVANTAR BACKEND CON DOCKER
+================================================================================
+
+cd SmartLogix
+docker-compose down
+docker-compose up --build -d
+
+Esperar aproximadamente 3 minutos hasta que todos los servicios esten healthy.
+Verificar en: http://localhost:8761 (deben aparecer 6 servicios registrados)
+
+================================================================================
+3. LEVANTAR FRONTEND
+================================================================================
+
+Abrir una NUEVA terminal (PowerShell) y ejecutar:
+
+cd front/fron_smart_logix
+npm run dev
+
+El frontend estara disponible en: http://localhost:5173
+
+================================================================================
+4. CREDENCIALES DE PRUEBA
+================================================================================
+
+Usuario: admin
+Password: admin123
+
+================================================================================
+5. VERIFICAR QUE LA IA FUNCIONA
+================================================================================
+
+1. Iniciar sesion en http://localhost:5173
+2. Ir a la pestana "Inventario"
+3. Clic en "Recomendaciones" (debe aparecer tabla con badge "Respuesta IA" o "Reglas locales")
+4. Abrir el chatbot flotante (boton "?" en esquina inferior derecha)
+5. Escribir una pregunta: "Hola, cuanto inventario hay?"
+6. La respuesta debe mostrar "Respuesta IA" (azul) o "Reglas locales" (gris)
+
+================================================================================
+6. SI LA IA NO RESPONDE (FALLBACK)
+================================================================================
+
+Si el badge dice "Reglas locales", significa que la API de Groq no respondio.
+El sistema funciona igual con respuestas predefinidas. Esto es normal si:
+- La API key esta agotada o invalida
+- No hay conexion a internet desde el contenedor
+- El servicio de Groq esta caido
+
+Para la presentacion, puedes explicar que el fallback garantiza que el chatbot
+SIEMPRE responda, aunque la IA externa no este disponible.
+
+================================================================================
+7. PUERTOS IMPORTANTES
+================================================================================
+
+- Frontend:      http://localhost:5173
+- API Gateway:   http://localhost:8080
+- Eureka:        http://localhost:8761
+
+================================================================================
+FIN
+================================================================================

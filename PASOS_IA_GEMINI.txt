@@ -26,21 +26,18 @@ Pasos para obtener tu key:
 Abre PowerShell (o CMD) y ejecuta estos comandos en orden:
 
 --- PASO 1: Ir a la carpeta del backend ---
-cd "C:\Users\bianc\OneDrive\Escritorio\SmartLogixAuth\SmartLogix"
+cd "SmartLogixAuth\SmartLogix"
 
 --- PASO 2: Definir la API key (forma rapida) ---
 $env:GEMINI_API_KEY="PEGA_AQUI_TU_KEY_REAL"
 
-Ejemplo real:
-$env:GEMINI_API_KEY="AIzaSyB1234567890abcdefg..."
 
 --- PASO 3: Levantar todo con Docker ---
 docker-compose up --build -d
 
-Esperar ~2 minutos hasta que todos los servicios esten healthy.
 
 --- PASO 4: Levantar el frontend (en otra terminal) ---
-cd "C:\Users\bianc\OneDrive\Escritorio\SmartLogixAuth\front\fron_smart_logix"
+cd "SmartLogixAuth\front\fron_smart_logix"
 npm run dev
 
 --- PASO 5: Abrir navegador ---
