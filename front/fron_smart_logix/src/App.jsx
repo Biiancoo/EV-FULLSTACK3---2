@@ -8,9 +8,9 @@ import ChatbotWidget from "./pages/ChatbotWidget";
 import { clearLogin, getSaveToken, getSaveUser } from "./service/authService";
 
 const PRIVATE_ROUTER = [
-  { key: "shipment", label: "Envios", hash: "#/shipment" },
-  { key: "order", label: "Ordenes", hash: "#/order" },
-  { key: "inventory", label: "Inventario", hash: "#/inventory" },
+  { key: "shipment", label: "Envíos", icon: "📦", hash: "#/shipment" },
+  { key: "order", label: "Órdenes", icon: "🛒", hash: "#/order" },
+  { key: "inventory", label: "Inventario", icon: "🗃️", hash: "#/inventory" },
 ];
 
 function getRouteFromHash() {
@@ -68,6 +68,7 @@ function App() {
               href={route.hash}
               className={`nav-link ${current === route.key ? "active" : ""}`}
             >
+              <span style={{ marginRight: 8 }}>{route.icon}</span>
               {route.label}
             </a>
           ))}

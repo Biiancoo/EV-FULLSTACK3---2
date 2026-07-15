@@ -147,9 +147,9 @@ function InventoryPage() {
       </div>
 
       {showRecs && (
-        <div className="op-panel" style={{ background: "#1a1a2e", border: "1px solid #3a3a5e" }}>
+        <div className="op-panel" style={{ background: "rgba(155, 107, 255, 0.06)", border: "1px solid rgba(155, 107, 255, 0.3)" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <h3 style={{ color: "#a78bfa" }}>Analisis Inteligente de Inventario</h3>
+            <h3 style={{ color: "#c4a8ff" }}>Analisis Inteligente de Inventario</h3>
             {recSource && (
               <span className={`badge badge--${recSource.toLowerCase()}`}>
                 {recSource === "AI" ? "Respuesta IA" : "Reglas locales"}
@@ -197,7 +197,7 @@ function InventoryPage() {
                       <td>{r.currentStock}</td>
                       <td>{r.reservedStock}</td>
                       <td>{r.reorderLevel}</td>
-                      <td style={{ fontWeight: "bold", color: "#a78bfa" }}>{r.recommendedQuantity}</td>
+                      <td style={{ fontWeight: "bold", color: "#c4a8ff" }}>{r.recommendedQuantity}</td>
                       <td style={{ fontSize: "0.85rem", maxWidth: "280px" }}>{r.reason}</td>
                     </tr>
                   ))}
